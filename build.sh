@@ -28,9 +28,19 @@ cp -a "$PI_GEN/stage2/04-cloud-init/files" armbian/userpatches/aircast-pi-gen/st
 docker run --rm --privileged ghcr.io/armbian/docker-armbian-build:armbian-ubuntu-noble-latest sh -c \
 	'grep -qw ext4 /proc/filesystems || { truncate -s 8M /e && mkfs.ext4 -q /e && mount -o loop /e /mnt && umount /mnt; }'
 
+case "${IMAGE_VERSION:-dev}" in
+	dev)       release=() ;;
+	*-dev.*)   release=(AIRCAST_DISTRIBUTION=development) ;;
+	*-stage.*) release=(AIRCAST_DISTRIBUTION=staging) ;;
+	*-rc.*)    release=(AIRCAST_DISTRIBUTION=testing) ;;
+	*-beta.*)  release=(AIRCAST_DISTRIBUTION=stable AIRCAST_APT_CHANNEL=testing) ;;
+	*)         release=(AIRCAST_DISTRIBUTION=stable) ;;
+esac
+
 exec ./armbian/compile.sh aircast \
 	BOARD="$board" \
 	IMAGE_VERSION="${IMAGE_VERSION:-dev}" \
+	"${release[@]}" \
 	PI_GEN_REF="$(git -C "$PI_GEN" rev-parse --abbrev-ref HEAD)" \
 	PI_GEN_COMMIT="$(git -C "$PI_GEN" rev-parse HEAD)" \
 	"$@"
