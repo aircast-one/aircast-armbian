@@ -29,7 +29,7 @@ for p in aircastd aircast-streamer tailscale wfb-ng cloud-init linux-sysctl-defa
 done
 ls /r/lib/modules/*/updates/dkms/88XXau_wfb.ko >/dev/null 2>&1 || bad="$bad dkms"
 [ -e /b/uInitrd ] || bad="$bad uInitrd"
-grep -q "cfg80211.ieee80211_regdom=" /b/armbianEnv.txt || bad="$bad regdom"
+cat /b/armbianEnv.txt /b/extlinux/extlinux.conf 2>/dev/null | grep -q "cfg80211.ieee80211_regdom=" || bad="$bad regdom"
 grep -q "\"distribution\": \"$2\"" /r/etc/aircast-release.json || bad="$bad distribution"
 [ -z "$4" ] || grep -q "\"aircastd_version\": \"$4\"" /r/etc/aircast-release.json || bad="$bad aircastd"
 grep -q "$3" /r/etc/aircast/oauth.json || bad="$bad issuer"
