@@ -68,6 +68,11 @@ jobs:
         board: ${{ fromJson(needs.release.outputs.boards) }}
     env:
       BOARD: ${{ matrix.board }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT_URL: https://cb3f7d95c2d311b22c4e57e0759d3a13.r2.cloudflarestorage.com
+      AWS_DEFAULT_REGION: auto
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
     steps:
       - name: Skip a board already released
         id: released
@@ -79,10 +84,8 @@ jobs:
           fi
 
       - uses: actions/checkout@v7
-        if: steps.released.outputs.done != 'true'
 
       - uses: actions/checkout@v7
-        if: steps.released.outputs.done != 'true'
         with:
           repository: aircast-one/aircast-pi-gen
           ref: lite-arm64
@@ -115,3 +118,21 @@ jobs:
           xz -T0 -c "$IMG" > "$asset"
           sha256sum "$asset" > "$asset.sha256"
           gh release upload "$VERSION" -R "$GITHUB_REPOSITORY" "$asset" "$asset.sha256" --clobber
+
+      - name: Publish to R2
+        run: |
+          asset="aircast-$BOARD-$VERSION.img.xz"
+          read -r channel _ <<< "$(aircast-pi-gen/scripts/publish-local.sh --print-channel "$VERSION")"
+          if aws s3api head-object --bucket "aircast-artifacts-$channel" --key "$BOARD/$VERSION/$asset" >/dev/null 2>&1; then
+            echo "$asset is already in the R2 catalog"
+            exit 0
+          fi
+          mkdir -p r2
+          if [ -f "$asset" ]; then
+            mv "$asset" r2/
+          else
+            gh release download "$VERSION" -R "$GITHUB_REPOSITORY" -D r2 -p "$asset"
+          fi
+          printf '%s %s\n' "$VERSION" "$asset" > r2/.publish-version
+          DEPLOY_DIR=r2 URL_PATH="$BOARD" ASSET_PREFIX="aircast-$BOARD" \
+            aircast-pi-gen/scripts/publish-local.sh "$VERSION" --yes
