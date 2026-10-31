@@ -1,0 +1,117 @@
+name: Build and release board images
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Image version, e.g. v0.4.0-beta.5'
+        required: true
+        type: string
+      aircastd_version:
+        description: 'aircastd version to pin, e.g. v0.4.6-rc.13 (empty = newest in the channel)'
+        required: false
+        type: string
+      boards:
+        description: 'Boards to build, space separated (empty = all)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: board-images-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  VERSION: ${{ inputs.version }}
+  AIRCASTD_VERSION: ${{ inputs.aircastd_version }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      boards: ${{ steps.boards.outputs.boards }}
+    steps:
+      - name: Check the version
+        run: |
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc|stage|dev)\.[0-9]+)?$ ]] || {
+            echo "::error::Invalid version $VERSION (expected v1.2.3 or v1.2.3-beta.1|rc.1|stage.1|dev.1)"
+            exit 1
+          }
+
+      - name: Pick the boards
+        id: boards
+        env:
+          PICKED: ${{ inputs.boards }}
+        run: |
+          all="radxa-zero3 orangepi3b orangepi5 orangepi5-max orangepi5-plus orangepi5-ultra orangepi5pro radxa-e25 radxa-e52c rock-3a rock-3c rock-5-itx rock-5a rock-5b rock-5b-plus rock-5c rock-5t"
+          echo "boards=$(printf '%s\n' ${PICKED:-$all} | jq -Rnc '[inputs | select(length > 0)]')" >> "$GITHUB_OUTPUT"
+
+      - name: Create the release
+        run: |
+          gh release view "$VERSION" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && exit 0
+          gh release create "$VERSION" -R "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Aircast OS $VERSION for Orange Pi and Radxa" \
+            $([[ "$VERSION" == *-* ]] && echo --prerelease) \
+            --notes "Aircast OS images for Orange Pi and Radxa boards. Write one with Aircast Flasher, which picks the image for your board. Each image has a .sha256 checksum next to it."
+
+  build:
+    needs: release
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        board: ${{ fromJson(needs.release.outputs.boards) }}
+    env:
+      BOARD: ${{ matrix.board }}
+    steps:
+      - name: Skip a board already released
+        id: released
+        run: |
+          asset="aircast-$BOARD-$VERSION.img.xz"
+          if gh release view "$VERSION" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep -qx "$asset"; then
+            echo "$asset is already released"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.released.outputs.done != 'true'
+
+      - uses: actions/checkout@v7
+        if: steps.released.outputs.done != 'true'
+        with:
+          repository: aircast-one/aircast-pi-gen
+          ref: lite-arm64
+          path: aircast-pi-gen
+
+      - name: Free disk space
+        if: steps.released.outputs.done != 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost /usr/local/.ghcup /usr/share/swift
+          df -h /
+
+      - name: Build
+        if: steps.released.outputs.done != 'true'
+        run: |
+          IMAGE_VERSION="$VERSION" PI_GEN="$GITHUB_WORKSPACE/aircast-pi-gen" \
+            ./build.sh "$BOARD" PREFER_DOCKER=yes ${AIRCASTD_VERSION:+AIRCASTD_VERSION=$AIRCASTD_VERSION}
+
+      - name: Check the image
+        if: steps.released.outputs.done != 'true'
+        run: |
+          img=$(ls armbian/output/images/Armbian-unofficial_"$VERSION"_"${BOARD^}"_*.img | head -1)
+          deb="${AIRCASTD_VERSION#v}"
+          ./scripts/verify-image.sh "$img" "$VERSION" "${deb/-/\~}"
+          echo "IMG=$img" >> "$GITHUB_ENV"
+
+      - name: Upload to the release
+        if: steps.released.outputs.done != 'true'
+        run: |
+          asset="aircast-$BOARD-$VERSION.img.xz"
+          xz -T0 -c "$IMG" > "$asset"
+          sha256sum "$asset" > "$asset.sha256"
+          gh release upload "$VERSION" -R "$GITHUB_REPOSITORY" "$asset" "$asset.sha256" --clobber
