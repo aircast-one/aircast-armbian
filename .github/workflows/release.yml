@@ -46,7 +46,7 @@ jobs:
         env:
           PICKED: ${{ inputs.boards }}
         run: |
-          all="radxa-zero3 orangepi3b orangepi5 orangepi5-max orangepi5-plus orangepi5-ultra orangepi5pro radxa-e25 radxa-e52c rock-3a rock-3c rock-5-itx rock-5a rock-5b rock-5b-plus rock-5c rock-5t"
+          all="radxa-zero3 orangepi3b orangepi5 orangepi5-max orangepi5-plus orangepi5-ultra orangepi5pro radxa-e25 radxa-e52c rock-3a rock-3c rock-5-itx rock-5a rock-5b rock-5b-plus rock-5c rock-5t bananapim7 bananapir2pro bananapim5 bananapim2pro bananapim2s bananapicm4io bananapim4zero bananapim4berry bananapim64"
           echo "boards=$(printf '%s\n' ${PICKED:-$all} | jq -Rnc '[inputs | select(length > 0)]')" >> "$GITHUB_OUTPUT"
 
       - name: Create the release
@@ -54,9 +54,9 @@ jobs:
           gh release view "$VERSION" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && exit 0
           gh release create "$VERSION" -R "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Aircast OS $VERSION for Orange Pi and Radxa" \
+            --title "Aircast OS $VERSION for Orange Pi, Radxa and Banana Pi" \
             $([[ "$VERSION" == *-* ]] && echo --prerelease) \
-            --notes "Aircast OS images for Orange Pi and Radxa boards. Write one with Aircast Flasher, which picks the image for your board. Each image has a .sha256 checksum next to it."
+            --notes "Aircast OS images for Orange Pi, Radxa and Banana Pi boards. Write one with Aircast Flasher, which picks the image for your board. Each image has a .sha256 checksum next to it."
 
   build:
     needs: release
